@@ -163,8 +163,8 @@ export default function App() {
 
     useEffect(() => {
         try {
-            if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
-                 throw new Error("Firebase configuration is missing or empty.");
+            if (!firebaseConfig || Object.keys(firebaseConfig).length < 6) {
+                 throw new Error("Firebase configuration is missing or incomplete.");
             }
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
