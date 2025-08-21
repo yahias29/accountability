@@ -1,14 +1,38 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, onSnapshot, query, where, doc, deleteDoc, serverTimestamp, setDoc, updateDoc, arrayUnion, arrayRemove, getDocs } from 'firebase/firestore';
 import { CheckCircle2, Plus, Trash2, Zap, BookOpen, Heart, BrainCircuit, Briefcase, Star, MessageSquare, Sun, Moon, BarChart2, Book, ChevronLeft, ChevronRight, ListChecks, CalendarDays, Search, Award } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend, CartesianGrid } from 'recharts';
 
 // --- Firebase Configuration ---
+let firebaseConfig;
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-aetheria-app';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// This logic handles both Netlify deployment (using process.env) and the local preview environment (using __firebase_config)
+try {
+    // For Netlify deployment where environment variables are set
+    if (typeof process !== 'undefined' && process.env.REACT_APP_FIREBASE_API_KEY) {
+        firebaseConfig = {
+            apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+            authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+            projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+            storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+            messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+            appId: process.env.REACT_APP_FIREBASE_APP_ID
+        };
+    // For local preview environment which provides a global config object
+    } else if (typeof __firebase_config !== 'undefined') {
+        firebaseConfig = JSON.parse(__firebase_config);
+    } else {
+        throw new Error("Firebase configuration not found in any environment.");
+    }
+} catch (error) {
+    console.error("Could not load Firebase configuration:", error);
+    // Set a dummy config to prevent app from crashing immediately on render
+    firebaseConfig = {};
+}
+
 
 // --- Helper Functions ---
 const formatDate = (date) => date.toISOString().split('T')[0];
@@ -139,23 +163,40 @@ export default function App() {
 
     useEffect(() => {
         try {
+            if (!firebaseConfig || Object.keys(firebaseConfig).length === 0) {
+                 throw new Error("Firebase configuration is missing or empty.");
+            }
             const app = initializeApp(firebaseConfig);
             const authInstance = getAuth(app);
             setDb(getFirestore(app));
             const unsubAuth = onAuthStateChanged(authInstance, async (user) => {
-                if (user) { setUserId(user.uid); } 
-                else { try { if (initialAuthToken) await signInWithCustomToken(authInstance, initialAuthToken); else await signInAnonymously(authInstance); } catch (e) { setError("Auth failed."); } }
+                if (user) { 
+                    setUserId(user.uid); 
+                } else { 
+                    try { 
+                        await signInAnonymously(authInstance); 
+                    } catch (e) { 
+                        setError("Anonymous sign-in failed."); 
+                        console.error("Anonymous sign-in error:", e);
+                    } 
+                }
                 setIsAuthReady(true);
             });
             return () => unsubAuth();
-        } catch (e) { setError("Service connection failed."); setIsLoading(false); }
+        } catch (e) { 
+            console.error("Firebase Init Error:", e.message);
+            setError("Service connection failed."); 
+            setIsLoading(false); 
+        }
     }, []);
 
     useEffect(() => {
         if (!isAuthReady || !db || !userId) return;
         
+        const dbPath = `artifacts/${appId}/users/${userId}`;
+        
         const setupInitialChecklist = async () => {
-            const checklistCollection = collection(db, `/artifacts/${appId}/users/${userId}/checklist_items`);
+            const checklistCollection = collection(db, `${dbPath}/checklist_items`);
             const snapshot = await getDocs(checklistCollection);
             if (snapshot.empty) {
                 for (const itemText of initialChecklistItems) {
@@ -165,21 +206,21 @@ export default function App() {
         };
         setupInitialChecklist();
 
-        const q = query(collection(db, `/artifacts/${appId}/users/${userId}/entries`), where("date", "==", formatDate(selectedDate)));
+        const q = query(collection(db, `${dbPath}/entries`), where("date", "==", formatDate(selectedDate)));
         const unsubEntries = onSnapshot(q, (snap) => { setEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp?.toMillis() - a.timestamp?.toMillis())); setIsLoading(false); }, () => setError("Failed to load log entries."));
-        const unsubAllEntries = onSnapshot(collection(db, `/artifacts/${appId}/users/${userId}/entries`), (snap) => setAllTimeEntries(snap.docs.map(d => ({id: d.id, ...d.data()}))));
-        const unsubChecklistItems = onSnapshot(query(collection(db, `/artifacts/${appId}/users/${userId}/checklist_items`)), (snap) => setChecklistItems(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.createdAt?.toMillis() - b.createdAt?.toMillis())));
-        const unsubChecklistHistory = onSnapshot(collection(db, `/artifacts/${appId}/users/${userId}/checklist_history`), (snap) => { const history = {}; snap.forEach(d => { history[d.id] = d.data().completedItems || []; }); setChecklistHistory(history); });
+        const unsubAllEntries = onSnapshot(collection(db, `${dbPath}/entries`), (snap) => setAllTimeEntries(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+        const unsubChecklistItems = onSnapshot(query(collection(db, `${dbPath}/checklist_items`)), (snap) => setChecklistItems(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => a.createdAt?.toMillis() - b.createdAt?.toMillis())));
+        const unsubChecklistHistory = onSnapshot(collection(db, `${dbPath}/checklist_history`), (snap) => { const history = {}; snap.forEach(d => { history[d.id] = d.data().completedItems || []; }); setChecklistHistory(history); });
 
         return () => { unsubEntries(); unsubAllEntries(); unsubChecklistItems(); unsubChecklistHistory(); };
     }, [isAuthReady, db, userId, selectedDate]);
 
     // --- Handlers ---
-    const handleAddEntry = async (e) => { e.preventDefault(); if (!db || !userId || !newEntryText.trim()) return; try { await addDoc(collection(db, `/artifacts/${appId}/users/${userId}/entries`), { text: newEntryText.trim(), category: newEntryCategory, rating: newEntryRating, date: formatDate(new Date()), timestamp: serverTimestamp() }); setNewEntryText(''); setNewEntryRating(3); setNewEntryCategory('Task'); setShowForm(false); setSelectedDate(new Date()); } catch (err) { setError("Could not save entry."); } };
-    const handleDeleteEntry = async (id) => { if (!db || !userId) return; try { await deleteDoc(doc(db, `/artifacts/${appId}/users/${userId}/entries`, id)); } catch (err) { setError("Could not delete entry."); } };
-    const handleAddChecklistItem = async (text) => { if (!db || !userId) return; try { await addDoc(collection(db, `/artifacts/${appId}/users/${userId}/checklist_items`), { text, createdAt: serverTimestamp() }); } catch (err) { setError("Could not add item."); } };
-    const handleDeleteChecklistItem = async (id) => { if (!db || !userId) return; try { await deleteDoc(doc(db, `/artifacts/${appId}/users/${userId}/checklist_items`, id)); } catch (err) { setError("Could not delete item."); } };
-    const handleToggleChecklistItem = async (itemId, isCompleted) => { if (!db || !userId) return; const dateStr = formatDate(selectedDate); const docRef = doc(db, `/artifacts/${appId}/users/${userId}/checklist_history`, dateStr); try { await updateDoc(docRef, { completedItems: isCompleted ? arrayUnion(itemId) : arrayRemove(itemId) }); } catch (e) { if (e.code === 'not-found') await setDoc(docRef, { completedItems: [itemId] }); else setError("Could not update checklist."); } };
+    const handleAddEntry = async (e) => { e.preventDefault(); if (!db || !userId || !newEntryText.trim()) return; try { await addDoc(collection(db, `artifacts/${appId}/users/${userId}/entries`), { text: newEntryText.trim(), category: newEntryCategory, rating: newEntryRating, date: formatDate(new Date()), timestamp: serverTimestamp() }); setNewEntryText(''); setNewEntryRating(3); setNewEntryCategory('Task'); setShowForm(false); setSelectedDate(new Date()); } catch (err) { setError("Could not save entry."); } };
+    const handleDeleteEntry = async (id) => { if (!db || !userId) return; try { await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/entries`, id)); } catch (err) { setError("Could not delete entry."); } };
+    const handleAddChecklistItem = async (text) => { if (!db || !userId) return; try { await addDoc(collection(db, `artifacts/${appId}/users/${userId}/checklist_items`), { text, createdAt: serverTimestamp() }); } catch (err) { setError("Could not add item."); } };
+    const handleDeleteChecklistItem = async (id) => { if (!db || !userId) return; try { await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/checklist_items`, id)); } catch (err) { setError("Could not delete item."); } };
+    const handleToggleChecklistItem = async (itemId, isCompleted) => { if (!db || !userId) return; const dateStr = formatDate(selectedDate); const docRef = doc(db, `artifacts/${appId}/users/${userId}/checklist_history`, dateStr); try { await updateDoc(docRef, { completedItems: isCompleted ? arrayUnion(itemId) : arrayRemove(itemId) }); } catch (e) { if (e.code === 'not-found') await setDoc(docRef, { completedItems: [itemId] }); else setError("Could not update checklist."); } };
 
     // --- Views ---
     const LogView = () => {
