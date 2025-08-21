@@ -349,9 +349,6 @@ export default function App() {
 
     // --- Render ---
     return (
-        if (error) {
-            return <div className="text-red-500 p-8">Error: {error} <br/> Project ID Check: {process.env.REACT_APP_FIREBASE_PROJECT_ID || "Not Found"}</div>
-        }
         <div className="bg-slate-100 dark:bg-slate-900 min-h-screen font-sans text-slate-700 dark:text-slate-300 transition-colors duration-500">
             <div className="fixed inset-0 -z-10 h-full w-full bg-white bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:14px_24px] dark:bg-slate-900 dark:bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)]"></div>
             <CalendarModal isOpen={isCalendarOpen} onClose={() => setCalendarOpen(false)} setSelectedDate={setSelectedDate} loggedDays={loggedDays} />
